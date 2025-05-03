@@ -1,6 +1,6 @@
 export default async function handler(req, res) {
   const { username } = req.query;
-  const { type = 'heatmap', theme = 'light', tz = 'UTC' } = req.query;
+  const { type = 'radial', theme = 'light', tz = 'UTC' } = req.query;
 
   const token = process.env.GITHUB_TOKEN;
   const headers = {
@@ -39,54 +39,51 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Initialize 7x24 grid
-  const heatmap = Array(7).fill(null).map(() => Array(24).fill(0));
+  const hourly = Array(24).fill(0);
   const contributions = result.data.user.contributionsCollection.commitContributionsByRepository;
 
   contributions.forEach(repo => {
     repo.contributions.nodes.forEach(commit => {
       const utcDate = new Date(commit.occurredAt);
       const local = new Date(utcDate.toLocaleString('en-US', { timeZone: tz }));
-      const day = local.getDay();    // 0 = Sunday
-      const hour = local.getHours(); // 0–23
-      heatmap[day][hour]++;
+      const hour = local.getHours();
+      hourly[hour]++;
     });
   });
 
-  // SVG generation
-  const cellSize = 15;
-  const svgWidth = 24 * cellSize + 100;
-  const svgHeight = 7 * cellSize + 50;
+  const maxVal = Math.max(...hourly);
+  const cx = 150, cy = 150, radius = 80, barLength = 50;
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">
-    <style>text { font-family: sans-serif; font-size: 10px; fill: ${theme === 'dark' ? '#eee' : '#000'}; }</style>
-    <rect width="100%" height="100%" fill="${theme === 'dark' ? '#111' : '#fff'}" />`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
+    <style>
+      text { font-family: sans-serif; font-size: 10px; fill: ${theme === 'dark' ? '#eee' : '#000'}; }
+    </style>
+    <rect width="100%" height="100%" fill="${theme === 'dark' ? '#111' : '#fff'}"/>
+    <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="#ccc" stroke-width="1"/>
+  `;
 
-  const colors = ['#ebedf0', '#c6e48b', '#7bc96f', '#239a3b', '#196127'];
-  const maxCount = Math.max(...heatmap.flat());
-
-  for (let d = 0; d < 7; d++) {
-    for (let h = 0; h < 24; h++) {
-      const count = heatmap[d][h];
-      const colorIdx = maxCount === 0 ? 0 : Math.floor((count / maxCount) * (colors.length - 1));
-      const fill = colors[colorIdx];
-      const x = h * cellSize + 50;
-      const y = d * cellSize + 30;
-      svg += `<rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="${fill}" />`;
-    }
+  for (let i = 0; i < 24; i++) {
+    const angle = (Math.PI * 2 * i) / 24 - Math.PI / 2;
+    const commitCount = hourly[i];
+    const scale = maxVal === 0 ? 0 : commitCount / maxVal;
+    const x1 = cx + radius * Math.cos(angle);
+    const y1 = cy + radius * Math.sin(angle);
+    const x2 = cx + (radius + scale * barLength) * Math.cos(angle);
+    const y2 = cy + (radius + scale * barLength) * Math.sin(angle);
+    const color = `hsl(${120 - scale * 120}, 80%, ${30 + scale * 50}%)`;
+    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`;
   }
 
-  // Add axis labels
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  days.forEach((day, i) => {
-    svg += `<text x="45" y="${i * cellSize + 42}" text-anchor="end">${day}</text>`;
-  });
-  for (let h = 0; h < 24; h++) {
-    svg += `<text x="${h * cellSize + 57}" y="20" text-anchor="middle">${h}</text>`;
+  for (let i = 0; i < 24; i += 3) {
+    const angle = (Math.PI * 2 * i) / 24 - Math.PI / 2;
+    const labelX = cx + (radius + barLength + 10) * Math.cos(angle);
+    const labelY = cy + (radius + barLength + 10) * Math.sin(angle);
+    svg += `<text x="${labelX}" y="${labelY}" text-anchor="middle" dominant-baseline="middle">${i}:00</text>`;
   }
 
-  svg += `</svg>`;
+  svg += '</svg>';
 
   res.setHeader('Content-Type', 'image/svg+xml');
   res.send(svg);
 }
+
