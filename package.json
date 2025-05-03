@@ -1,0 +1,15 @@
+{
+  "name": "commit-clock-heatmap",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "d3": "^7.8.5",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  }
+}
