@@ -1,6 +1,6 @@
 export default async function handler(req, res) {
   const { username } = req.query;
-  const { type = 'radial', theme = 'light', tz = 'UTC' } = req.query;
+  const { theme = 'light', tz = 'UTC' } = req.query;
 
   const token = process.env.GITHUB_TOKEN;
   const headers = {
@@ -12,10 +12,12 @@ export default async function handler(req, res) {
     query($login: String!) {
       user(login: $login) {
         contributionsCollection {
-          commitContributionsByRepository(maxRepositories: 10) {
-            contributions(first: 100) {
-              nodes {
-                occurredAt
+          contributionCalendar {
+            weeks {
+              contributionDays {
+                weekday
+                date
+                contributionCount
               }
             }
           }
@@ -39,46 +41,72 @@ export default async function handler(req, res) {
     return;
   }
 
-  const hourly = Array(24).fill(0);
-  const contributions = result.data.user.contributionsCollection.commitContributionsByRepository;
-
-  contributions.forEach(repo => {
-    repo.contributions.nodes.forEach(commit => {
-      const utcDate = new Date(commit.occurredAt);
-      const local = new Date(utcDate.toLocaleString('en-US', { timeZone: tz }));
-      const hour = local.getHours();
-      hourly[hour]++;
+  const allDates = [];
+  result.data.user.contributionsCollection.contributionCalendar.weeks.forEach(week => {
+    week.contributionDays.forEach(day => {
+      if (day.contributionCount > 0) {
+        allDates.push(day.date);
+      }
     });
   });
 
-  const maxVal = Math.max(...hourly);
-  const cx = 150, cy = 150, radius = 80, barLength = 50;
+  const hourlyMatrix = Array(7).fill(null).map(() => Array(24).fill(0));
+  const dateChunks = allDates.slice(0, 30); // Limit to 30 days of API calls
 
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
+  // Fetch commit timestamps per date using GitHub REST API
+  const commitFetches = await Promise.all(dateChunks.map(async (date) => {
+    const url = `https://api.github.com/search/commits?q=author:${username}+committer-date:${date}`;
+    const commitRes = await fetch(url, {
+      headers: {
+        Accept: 'application/vnd.github.cloak-preview',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      }
+    });
+    if (!commitRes.ok) return [];
+    const data = await commitRes.json();
+    return data.items || [];
+  }));
+
+  commitFetches.flat().forEach(commit => {
+    const utcDate = new Date(commit.commit.committer.date);
+    const local = new Date(utcDate.toLocaleString('en-US', { timeZone: tz }));
+    const day = local.getDay();    // 0 = Sunday
+    const hour = local.getHours(); // 0–23
+    hourlyMatrix[day][hour]++;
+  });
+
+  const maxVal = Math.max(...hourlyMatrix.flat());
+  const svgSize = 360;
+  const cx = svgSize / 2, cy = svgSize / 2;
+  const innerR = 70, layerW = 10;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}">
     <style>
-      text { font-family: sans-serif; font-size: 10px; fill: ${theme === 'dark' ? '#eee' : '#000'}; }
+      text { font-family: sans-serif; font-size: 9px; fill: ${theme === 'dark' ? '#eee' : '#111'}; }
     </style>
-    <rect width="100%" height="100%" fill="${theme === 'dark' ? '#111' : '#fff'}"/>
-    <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="#ccc" stroke-width="1"/>
-  `;
+    <rect width="100%" height="100%" fill="${theme === 'dark' ? '#111' : '#fff'}"/>`;
 
-  for (let i = 0; i < 24; i++) {
-    const angle = (Math.PI * 2 * i) / 24 - Math.PI / 2;
-    const commitCount = hourly[i];
-    const scale = maxVal === 0 ? 0 : commitCount / maxVal;
-    const x1 = cx + radius * Math.cos(angle);
-    const y1 = cy + radius * Math.sin(angle);
-    const x2 = cx + (radius + scale * barLength) * Math.cos(angle);
-    const y2 = cy + (radius + scale * barLength) * Math.sin(angle);
-    const color = `hsl(${120 - scale * 120}, 80%, ${30 + scale * 50}%)`;
-    svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`;
+  for (let day = 0; day < 7; day++) {
+    for (let hour = 0; hour < 24; hour++) {
+      const angle = (Math.PI * 2 * hour) / 24 - Math.PI / 2;
+      const r1 = innerR + day * layerW;
+      const r2 = r1 + layerW - 1;
+      const x1 = cx + r1 * Math.cos(angle);
+      const y1 = cy + r1 * Math.sin(angle);
+      const x2 = cx + r2 * Math.cos(angle);
+      const y2 = cy + r2 * Math.sin(angle);
+
+      const count = hourlyMatrix[day][hour];
+      const scale = maxVal === 0 ? 0 : count / maxVal;
+      const color = `hsl(${120 - scale * 120}, 80%, ${30 + scale * 50}%)`;
+
+      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2" />`;
+    }
   }
 
-  for (let i = 0; i < 24; i += 3) {
-    const angle = (Math.PI * 2 * i) / 24 - Math.PI / 2;
-    const labelX = cx + (radius + barLength + 10) * Math.cos(angle);
-    const labelY = cy + (radius + barLength + 10) * Math.sin(angle);
-    svg += `<text x="${labelX}" y="${labelY}" text-anchor="middle" dominant-baseline="middle">${i}:00</text>`;
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  for (let d = 0; d < 7; d++) {
+    svg += `<text x="${cx}" y="${cy - innerR - 10 - d * layerW}" text-anchor="middle">${dayLabels[d]}</text>`;
   }
 
   svg += '</svg>';
@@ -86,4 +114,3 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'image/svg+xml');
   res.send(svg);
 }
-
