@@ -41,6 +41,7 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Extract contribution days
   const allDates = [];
   result.data.user.contributionsCollection.contributionCalendar.weeks.forEach(week => {
     week.contributionDays.forEach(day => {
@@ -51,9 +52,9 @@ export default async function handler(req, res) {
   });
 
   const hourlyMatrix = Array(7).fill(null).map(() => Array(24).fill(0));
-  const dateChunks = allDates.slice(0, 30); // Limit to 30 days of API calls
+  const dateChunks = allDates.slice(-21); // Limit to 3 weeks for performance
 
-  // Fetch commit timestamps per date using GitHub REST API
+  // Fetch commits per day using GitHub's commit search API
   const commitFetches = await Promise.all(dateChunks.map(async (date) => {
     const url = `https://api.github.com/search/commits?q=author:${username}+committer-date:${date}`;
     const commitRes = await fetch(url, {
@@ -70,27 +71,32 @@ export default async function handler(req, res) {
   commitFetches.flat().forEach(commit => {
     const utcDate = new Date(commit.commit.committer.date);
     const local = new Date(utcDate.toLocaleString('en-US', { timeZone: tz }));
-    const day = local.getDay();    // 0 = Sunday
+    const day = local.getDay(); // 0 = Sunday
     const hour = local.getHours(); // 0–23
     hourlyMatrix[day][hour]++;
   });
 
   const maxVal = Math.max(...hourlyMatrix.flat());
-  const svgSize = 360;
+
+  // SVG Dimensions
+  const svgSize = 420;
   const cx = svgSize / 2, cy = svgSize / 2;
-  const innerR = 70, layerW = 10;
+  const baseRadius = 60;
+  const ringWidth = 15;
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}">
     <style>
-      text { font-family: sans-serif; font-size: 9px; fill: ${theme === 'dark' ? '#eee' : '#111'}; }
+      text { font-family: sans-serif; font-size: 10px; fill: ${theme === 'dark' ? '#eee' : '#222'}; }
     </style>
     <rect width="100%" height="100%" fill="${theme === 'dark' ? '#111' : '#fff'}"/>`;
 
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
   for (let day = 0; day < 7; day++) {
+    const r1 = baseRadius + day * ringWidth;
+    const r2 = r1 + ringWidth - 2;
     for (let hour = 0; hour < 24; hour++) {
       const angle = (Math.PI * 2 * hour) / 24 - Math.PI / 2;
-      const r1 = innerR + day * layerW;
-      const r2 = r1 + layerW - 1;
       const x1 = cx + r1 * Math.cos(angle);
       const y1 = cy + r1 * Math.sin(angle);
       const x2 = cx + r2 * Math.cos(angle);
@@ -100,16 +106,24 @@ export default async function handler(req, res) {
       const scale = maxVal === 0 ? 0 : count / maxVal;
       const color = `hsl(${120 - scale * 120}, 80%, ${30 + scale * 50}%)`;
 
-      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2" />`;
+      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="2"/>`;
     }
+
+    // Day labels
+    const labelY = cy - baseRadius - 10 - day * ringWidth;
+    svg += `<text x="${cx}" y="${labelY}" text-anchor="middle">${dayLabels[day]}</text>`;
   }
 
-  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  for (let d = 0; d < 7; d++) {
-    svg += `<text x="${cx}" y="${cy - innerR - 10 - d * layerW}" text-anchor="middle">${dayLabels[d]}</text>`;
+  // Hour labels
+  for (let hour = 0; hour < 24; hour += 3) {
+    const angle = (Math.PI * 2 * hour) / 24 - Math.PI / 2;
+    const labelR = baseRadius + 7 * ringWidth + 10;
+    const x = cx + labelR * Math.cos(angle);
+    const y = cy + labelR * Math.sin(angle);
+    svg += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle">${hour}:00</text>`;
   }
 
-  svg += '</svg>';
+  svg += `</svg>`;
 
   res.setHeader('Content-Type', 'image/svg+xml');
   res.send(svg);
