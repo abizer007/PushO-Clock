@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 async function fetchCommits(username: string) {
   const res = await fetch(`https://api.github.com/users/${username}/events/public`, {
     headers: {
-      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+     // Remove Authorization for GitHub Camo compatibility
+    // Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+
       "User-Agent": "PushO-Clock",
     },
   });
