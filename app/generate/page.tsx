@@ -25,7 +25,7 @@ export default function GeneratePage() {
     }
   }
 
-  const embedCode = `![${username}'s GitHub Commit Heatmap](https://pusho-clock.vercel.app/api/heatmap?username=${username}&type=${chartType}&theme=${theme})`
+  const embedCode = `![${username}'s GitHub Commit Heatmap](https://pushoclock.vercel.app/api/heatmap?username=${username}&type=${chartType}&theme=${theme})`
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(embedCode)
@@ -58,7 +58,7 @@ export default function GeneratePage() {
             </Link>
           </nav>
           <div className="flex items-center gap-4">
-            <Link href="https://github.com/abizer007/pusho-clock" target="_blank" rel="noopener noreferrer">
+            <Link href="https://github.com/abizer007/pushoclock" target="_blank" rel="noopener noreferrer">
               <Button variant="outline" size="icon">
                 <Github className="h-4 w-4" />
                 <span className="sr-only">GitHub</span>
@@ -210,7 +210,7 @@ export default function GeneratePage() {
             <p className="text-sm text-muted-foreground">
               © {new Date().getFullYear()} PushO-Clock. All rights reserved.
             </p>
-            <Link href="https://github.com/abizer007/pusho-clock" target="_blank" rel="noopener noreferrer">
+            <Link href="https://github.com/abizer007/pushoclock" target="_blank" rel="noopener noreferrer">
               <Button variant="ghost" size="icon">
                 <Github className="h-4 w-4" />
                 <span className="sr-only">GitHub</span>
