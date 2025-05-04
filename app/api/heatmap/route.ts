@@ -1,26 +1,22 @@
 import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
-function formatDate(date: Date) {
+function formatMonth(date: Date) {
   return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
+    month: "long",
     year: "numeric",
     timeZone: "UTC",
   });
 }
 
-async function fetchWeeklyContributions(username: string) {
+async function fetch30DayContributions(username: string) {
   const today = new Date();
-  const dayOfWeek = today.getUTCDay();
-
-  const weekStart = new Date(today);
-  weekStart.setUTCDate(today.getUTCDate() - dayOfWeek);
-  weekStart.setUTCHours(0, 0, 0, 0);
-
-  const weekEnd = new Date(weekStart);
-  weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
-  weekEnd.setUTCHours(23, 59, 59, 999);
+  const endDate = new Date(today);
+  endDate.setUTCHours(23, 59, 59, 999);
+  
+  const startDate = new Date(endDate);
+  startDate.setUTCDate(endDate.getUTCDate() - 29);
+  startDate.setUTCHours(0, 0, 0, 0);
 
   const query = `
     query ($userLogin: String!, $from: DateTime!, $to: DateTime!) {
@@ -41,8 +37,8 @@ async function fetchWeeklyContributions(username: string) {
 
   const variables = {
     userLogin: username,
-    from: weekStart.toISOString(),
-    to: weekEnd.toISOString()
+    from: startDate.toISOString(),
+    to: endDate.toISOString()
   };
 
   const res = await fetch("https://api.github.com/graphql", {
@@ -54,98 +50,82 @@ async function fetchWeeklyContributions(username: string) {
     body: JSON.stringify({ query, variables }),
   });
 
-  if (!res.ok) {
-    console.error("GitHub API error:", await res.text());
-    return { contributions: [], weekStart, weekEnd };
-  }
+  if (!res.ok) return { contributions: {}, month: formatMonth(today) };
 
   const json = await res.json();
-  
-  if (!json.data?.user) {
-    console.error("User not found:", username);
-    return { contributions: [], weekStart, weekEnd };
-  }
+  const contributions = json.data?.user?.contributionsCollection?.contributionCalendar?.weeks
+    ?.flatMap((week: any) => week.contributionDays)
+    ?.reduce((acc: Record<string, number>, day: any) => {
+      acc[day.date] = day.contributionCount;
+      return acc;
+    }, {}) || {};
 
-  const weeks = json.data.user.contributionsCollection?.contributionCalendar?.weeks || [];
-  const contributions: { [day: string]: number } = {};
-
-  weeks.forEach((week: any) => {
-    week.contributionDays.forEach((day: any) => {
-      contributions[day.date] = day.contributionCount;
-    });
-  });
-
-  return { contributions, weekStart, weekEnd };
+  return { contributions, month: formatMonth(today) };
 }
 
-function renderRadialSVG(contributions: { [day: string]: number }, weekStart: Date, weekEnd: Date, username: string, theme = "green") {
+function renderCircularBarChart(contributions: Record<string, number>, month: string) {
   const width = 540;
   const center = width / 2;
-  const maxRadius = 200;
-  const radiusStep = maxRadius / 7;
-  const themeColor = theme === "blue" ? "#3b82f6" : "#22c55e";
+  const baseRadius = 180;
+  const maxBarLength = 80;
+  const themeColor = "#22c55e";
   const background = "#0f172a";
 
-  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const startLabel = formatDate(weekStart);
-  const endLabel = formatDate(weekEnd);
+  // Get last 30 days data
+  const dates = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() - 29 + i);
+    return d.toISOString().split('T')[0];
+  });
 
-  // Initialize weekly contributions
-  const weeklyContributions = Array(7).fill(0);
-  const currentDate = new Date(weekStart);
-  for (let i = 0; i < 7; i++) {
-    const dateStr = currentDate.toISOString().split('T')[0];
-    weeklyContributions[i] = contributions[dateStr] || 0;
-    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-  }
+  const values = dates.map(date => contributions[date] || 0);
+  const maxValue = Math.max(...values, 1);
 
   return `
-<svg width="${width}" height="${width + 50}" viewBox="0 0 ${width} ${width + 50}" xmlns="http://www.w3.org/2000/svg" style="background:${background}; font-family:sans-serif;">
-  <!-- Rings -->
-  ${Array.from({ length: 7 }).map((_, i) => {
-    const r = radiusStep * (i + 1);
-    return `<circle cx="${center}" cy="${center}" r="${r}" stroke="#1e293b" stroke-width="1" fill="none"/>`;
-  }).join("")}
-
-  <!-- Day Labels -->
-  ${dayLabels.map((label, i) => {
-    const r = radiusStep * (i + 1);
-    const angle = 225 * (Math.PI / 180);
-    const x = center + Math.cos(angle) * r;
-    const y = center + Math.sin(angle) * r;
-    return `<text x="${x}" y="${y}" fill="white" font-size="13" text-anchor="middle" transform="rotate(-25 ${x} ${y})">${label}</text>`;
-  }).join("")}
-
-  <!-- Contribution Dots -->
-  ${weeklyContributions.flatMap((count, dayIndex) => {
-    const radius = radiusStep * (dayIndex + 1);
-    const dots = [];
-    const maxDots = 24; // Max dots to display per day
-    const spacing = (2 * Math.PI) / Math.max(count, 1);
+<svg width="${width}" height="${width}" viewBox="0 0 ${width} ${width}" xmlns="http://www.w3.org/2000/svg" style="background:${background};">
+  <!-- Base circle -->
+  <circle cx="${center}" cy="${center}" r="${baseRadius}" fill="none" stroke="#1e293b" stroke-width="2"/>
+  
+  ${dates.map((date, index) => {
+    const angle = (index * 12) - 90; // 30 days × 12° = 360°
+    const radians = angle * Math.PI / 180;
+    const value = contributions[date] || 0;
+    const barLength = (value / maxValue) * maxBarLength;
     
-    for (let i = 0; i < Math.min(count, maxDots); i++) {
-      const angle = spacing * i;
-      const x = center + Math.cos(angle) * radius;
-      const y = center + Math.sin(angle) * radius;
-      dots.push(`<circle cx="${x}" cy="${y}" r="3" fill="${themeColor}"/>`);
-    }
-    return dots;
-  }).join("")}
+    const x1 = center + Math.cos(radians) * baseRadius;
+    const y1 = center + Math.sin(radians) * baseRadius;
+    const x2 = center + Math.cos(radians) * (baseRadius + barLength);
+    const y2 = center + Math.sin(radians) * (baseRadius + barLength);
 
-  <!-- Caption -->
-  <text x="${center}" y="${width + 30}" fill="#94a3b8" font-size="14" text-anchor="middle">
-    GitHub activity for ${username} from ${startLabel} to ${endLabel} (UTC)
+    return `
+    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
+          stroke="${themeColor}" 
+          stroke-width="4" 
+          stroke-linecap="round"
+          opacity="${0.5 + (value / maxValue) * 0.5}"/>
+    `;
+  }).join('')}
+
+  <!-- Month label -->
+  <text x="${center}" y="${center + 30}" 
+        fill="#94a3b8" 
+        font-size="18" 
+        text-anchor="middle" 
+        font-family="sans-serif">
+    ${month} Activity
   </text>
+  
+  <!-- Today marker -->
+  <circle cx="${center + baseRadius + maxBarLength}" cy="${center}" r="4" fill="#dc2626"/>
 </svg>`;
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const username = searchParams.get("username") || "octocat";
-  const theme = searchParams.get("theme") || "green";
 
-  const { contributions, weekStart, weekEnd } = await fetchWeeklyContributions(username);
-  const svg = renderRadialSVG(contributions, weekStart, weekEnd, username, theme);
+  const { contributions, month } = await fetch30DayContributions(username);
+  const svg = renderCircularBarChart(contributions, month);
 
   return new NextResponse(svg, {
     headers: {
