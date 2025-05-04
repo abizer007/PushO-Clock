@@ -11,8 +11,15 @@ function getMonthRange(date: Date) {
 }
 
 async function fetch30DayContributions(username: string) {
-  const endDate = new Date(); // TODAY
-  endDate.setUTCHours(23, 59, 59, 999);
+  const now = new Date();
+  // Get current UTC date components
+  const utcYear = now.getUTCFullYear();
+  const utcMonth = now.getUTCMonth();
+  const utcDate = now.getUTCDate();
+  
+  // Set endDate to end of current UTC day
+  const endDate = new Date(Date.UTC(utcYear, utcMonth, utcDate, 23, 59, 59, 999));
+  // Calculate startDate as 29 days before endDate at midnight UTC
   const startDate = new Date(endDate);
   startDate.setUTCDate(startDate.getUTCDate() - 29);
   startDate.setUTCHours(0, 0, 0, 0);
@@ -78,7 +85,13 @@ async function fetch30DayContributions(username: string) {
   }
 }
 
-function renderSVG(contributions: Record<string, number>, month: string, endDate: Date, username: string) {
+function renderSVG(
+  contributions: Record<string, number>,
+  month: string,
+  startDate: Date,
+  endDate: Date,
+  username: string
+) {
   const width = 600;
   const height = 600;
   const center = width / 2;
@@ -90,10 +103,11 @@ function renderSVG(contributions: Record<string, number>, month: string, endDate
   const gridColor = "#ffffff22";
   const textColor = "#E2E8F0";
 
+  // Generate dates starting from startDate
   const dates = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date(endDate);
-    d.setUTCDate(endDate.getUTCDate() - 29 + i);
-    return new Date(d); // ensure new instance
+    const d = new Date(startDate);
+    d.setUTCDate(d.getUTCDate() + i);
+    return d;
   });
 
   const values = dates.map((d) => {
@@ -125,7 +139,7 @@ function renderSVG(contributions: Record<string, number>, month: string, endDate
   <!-- Bars -->
   ${values.map((value, i) => {
     const angle = angleStep * i - 90;
-    const rad = angle * Math.PI / 180;
+    const rad = (angle * Math.PI) / 180;
     const barLength = (value / maxVal) * maxBarLength;
 
     const x1 = center + Math.cos(rad) * baseRadius;
@@ -147,7 +161,12 @@ function renderSVG(contributions: Record<string, number>, month: string, endDate
 
   <!-- Footer -->
   <text x="${center}" y="${height - 20}" text-anchor="middle" class="label">
-    Generated for @${username} • Updated ${new Date().toLocaleDateString()}
+    Generated for @${username} • Updated ${endDate.toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      month: "numeric",
+      day: "numeric",
+      year: "numeric",
+    })}
   </text>
 </svg>`;
 }
@@ -156,8 +175,8 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const username = searchParams.get("username") || "octocat";
 
-  const { contributions, month, endDate } = await fetch30DayContributions(username);
-  const svg = renderSVG(contributions, month, endDate, username);
+  const { contributions, month, startDate, endDate } = await fetch30DayContributions(username);
+  const svg = renderSVG(contributions, month, startDate, endDate, username);
 
   return new NextResponse(svg, {
     headers: {
