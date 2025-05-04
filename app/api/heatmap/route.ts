@@ -14,7 +14,6 @@ async function fetch30DayContributions(username: string) {
   const today = new Date();
   const endDate = new Date(today);
   endDate.setUTCHours(23, 59, 59, 999);
-  
   const startDate = new Date(endDate);
   startDate.setUTCDate(endDate.getUTCDate() - 29);
   startDate.setUTCHours(0, 0, 0, 0);
@@ -39,7 +38,7 @@ async function fetch30DayContributions(username: string) {
   const variables = {
     userLogin: username,
     from: startDate.toISOString(),
-    to: endDate.toISOString()
+    to: endDate.toISOString(),
   };
 
   try {
@@ -55,38 +54,42 @@ async function fetch30DayContributions(username: string) {
     if (!res.ok) throw new Error(`API Error: ${res.status}`);
 
     const json = await res.json();
-    const contributions = json.data?.user?.contributionsCollection?.contributionCalendar?.weeks
-      ?.flatMap((week: any) => week.contributionDays)
-      ?.reduce((acc: Record<string, number>, day: any) => {
-        acc[day.date] = day.contributionCount;
-        return acc;
-      }, {}) || {};
+    const contributions =
+      json.data?.user?.contributionsCollection?.contributionCalendar?.weeks
+        ?.flatMap((week: any) => week.contributionDays)
+        ?.reduce((acc: Record<string, number>, day: any) => {
+          acc[day.date] = day.contributionCount;
+          return acc;
+        }, {}) || {};
 
-    return { 
+    return {
       contributions,
       startDate,
       endDate,
-      month: getMonthRange(endDate)
+      month: getMonthRange(endDate),
     };
   } catch (error) {
     console.error("Fetch error:", error);
-    return { 
+    return {
       contributions: {},
       startDate,
       endDate,
-      month: getMonthRange(endDate)
+      month: getMonthRange(endDate),
     };
   }
 }
 
-function renderCircularChart(contributions: Record<string, number>, month: string, endDate: Date, username: string) {
-  const width = 800;
-  const height = 850;
+function renderSVG(contributions: Record<string, number>, month: string, endDate: Date, username: string) {
+  const width = 600;
+  const height = 600;
   const center = width / 2;
-  const baseRadius = 180;
-  const maxBarLength = 120;
-  const themeColor = "#22c55e";
+  const baseRadius = 140;
+  const maxBarLength = 100;
+  const angleStep = 360 / 30;
   const background = "#0C081F";
+  const barColor = "#22c55e";
+  const gridColor = "#ffffff22";
+  const textColor = "#E2E8F0";
 
   const dates = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(endDate);
@@ -94,67 +97,58 @@ function renderCircularChart(contributions: Record<string, number>, month: strin
     return d;
   });
 
-  const values = dates.map(d => {
-    const dateStr = d.toISOString().split('T')[0];
-    return contributions[dateStr] || 0;
+  const values = dates.map((d) => {
+    const key = d.toISOString().split("T")[0];
+    return contributions[key] || 0;
   });
 
-  const maxValue = Math.max(...values, 1);
+  const maxVal = Math.max(...values, 1);
 
   return `
-<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="background:${background};">
-
-  <!-- Grid circles -->
-  ${[40, 80, 120, 160].map(r => `
-    <circle cx="${center}" cy="${center}" r="${r}" fill="none" stroke="white" stroke-opacity="0.1" stroke-width="1" />
-  `).join('')}
-
-  <!-- Bars -->
-  ${dates.map((date, index) => {
-    const angle = (index * 12) - 90;
-    const radians = angle * Math.PI / 180;
-    const value = values[index];
-    const barLength = (value / maxValue) * maxBarLength;
-    const opacity = 0.3 + (value / maxValue) * 0.7;
-
-    const x1 = center + Math.cos(radians) * baseRadius;
-    const y1 = center + Math.sin(radians) * baseRadius;
-    const x2 = center + Math.cos(radians) * (baseRadius + barLength);
-    const y2 = center + Math.sin(radians) * (baseRadius + barLength);
-
-    const dayX = center + Math.cos(radians) * (baseRadius - 25);
-    const dayY = center + Math.sin(radians) * (baseRadius - 25);
-
-    return `
-    <g>
-      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
-            stroke="${themeColor}" 
-            stroke-width="6" 
-            stroke-linecap="round"
-            opacity="${opacity}" />
-      <text x="${dayX}" y="${dayY}" fill="#ffffff" font-size="12" 
-            text-anchor="middle" dominant-baseline="middle" 
-            opacity="0.5" font-family="Ubuntu, sans-serif">
-        ${date.getUTCDate()}
-      </text>
-    </g>`;
-  }).join('')}
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="background:${background}; font-family: 'Ubuntu', sans-serif;">
+  <defs>
+    <style>
+      .title { font-size: 24px; font-weight: bold; fill: white; }
+      .subtitle { font-size: 14px; fill: ${textColor}; }
+      .label { font-size: 10px; fill: ${textColor}; opacity: 0.5; }
+    </style>
+  </defs>
 
   <!-- Title -->
-  <text x="${center}" y="70" text-anchor="middle" font-size="36" fill="#ffffff" font-family="Mandalore, sans-serif">
-    GitHub Contributions
-  </text>
+  <text x="${center}" y="40" text-anchor="middle" class="title">GitHub Contributions</text>
+  <text x="${center}" y="60" text-anchor="middle" class="subtitle">Last 30 Days • ${month}</text>
 
-  <!-- Subtitle -->
-  <text x="${center}" y="105" text-anchor="middle" font-size="18" fill="#cbd5e1" font-family="Ubuntu, sans-serif">
-    Last 30 Days of Activity • ${month}
-  </text>
+  <!-- Radial grid -->
+  ${[25, 50, 75].map(r => `
+    <circle cx="${center}" cy="${center}" r="${r}" fill="none" stroke="${gridColor}" stroke-width="1" />`).join('')}
+
+  <!-- Bars -->
+  ${values.map((value, i) => {
+    const angle = angleStep * i - 90;
+    const rad = (angle * Math.PI) / 180;
+    const barLength = (value / maxVal) * maxBarLength;
+
+    const x1 = center + Math.cos(rad) * baseRadius;
+    const y1 = center + Math.sin(rad) * baseRadius;
+    const x2 = center + Math.cos(rad) * (baseRadius + barLength);
+    const y2 = center + Math.sin(rad) * (baseRadius + barLength);
+
+    const dayLabelX = center + Math.cos(rad) * (baseRadius - 20);
+    const dayLabelY = center + Math.sin(rad) * (baseRadius - 20);
+
+    return `
+      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+            stroke="${barColor}" stroke-width="5" stroke-linecap="round"
+            opacity="${0.4 + (value / maxVal) * 0.6}" />
+      <text x="${dayLabelX}" y="${dayLabelY}" text-anchor="middle" alignment-baseline="middle" class="label">
+        ${dates[i].getUTCDate()}
+      </text>`;
+  }).join("")}
 
   <!-- Footer -->
-  <text x="${center}" y="${height - 30}" text-anchor="middle" font-size="12" fill="#94a3b8" font-family="Ubuntu, sans-serif">
-    Generated for @${username} • Updated ${new Date().toLocaleDateString("en-US")}
+  <text x="${center}" y="${height - 20}" text-anchor="middle" class="label">
+    Generated for @${username} • Updated ${new Date().toLocaleDateString()}
   </text>
-
 </svg>`;
 }
 
@@ -163,7 +157,7 @@ export async function GET(req: Request) {
   const username = searchParams.get("username") || "octocat";
 
   const { contributions, month, endDate } = await fetch30DayContributions(username);
-  const svg = renderCircularChart(contributions, month, endDate, username);
+  const svg = renderSVG(contributions, month, endDate, username);
 
   return new NextResponse(svg, {
     headers: {
