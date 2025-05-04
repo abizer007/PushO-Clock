@@ -22,54 +22,63 @@ async function fetchWeeklyContributions(username: string) {
   weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
   weekEnd.setUTCHours(23, 59, 59, 999);
 
+  const query = `
+    query ($userLogin: String!, $from: DateTime!, $to: DateTime!) {
+      user(login: $userLogin) {
+        contributionsCollection(from: $from, to: $to) {
+          contributionCalendar {
+            weeks {
+              contributionDays {
+                date
+                contributionCount
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    userLogin: username,
+    from: weekStart.toISOString(),
+    to: weekEnd.toISOString()
+  };
+
   const res = await fetch("https://api.github.com/graphql", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      query: `
-        query {
-          user(login: "${username}") {
-            contributionsCollection(from: "${weekStart.toISOString()}", to: "${weekEnd.toISOString()}") {
-              contributionCalendar {
-                weeks {
-                  contributionDays {
-                    date
-                    weekday
-                    contributionCount
-                  }
-                }
-              }
-            }
-          }
-        }
-      `,
-    }),
+    body: JSON.stringify({ query, variables }),
   });
 
   if (!res.ok) {
     console.error("GitHub API error:", await res.text());
-    return { commits: [], weekStart, weekEnd };
+    return { contributions: [], weekStart, weekEnd };
   }
 
   const json = await res.json();
-  const days = json?.data?.user?.contributionsCollection?.contributionCalendar?.weeks?.flatMap(
-    (week: any) => week.contributionDays
-  ) || [];
+  
+  if (!json.data?.user) {
+    console.error("User not found:", username);
+    return { contributions: [], weekStart, weekEnd };
+  }
 
-  const commits = days.flatMap((d: any) => {
-    const date = new Date(d.date);
-    return Array(d.contributionCount).fill(null).map(() => ({
-      date: date.toISOString(),
-    }));
+  const weeks = json.data.user.contributionsCollection?.contributionCalendar?.weeks || [];
+  const contributions: { [day: string]: number } = {};
+
+  weeks.forEach((week: any) => {
+    week.contributionDays.forEach((day: any) => {
+      contributions[day.date] = day.contributionCount;
+    });
   });
 
-  return { commits, weekStart, weekEnd };
+  return { contributions, weekStart, weekEnd };
 }
 
-function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, username: string, theme = "green") {
+function renderRadialSVG(contributions: { [day: string]: number }, weekStart: Date, weekEnd: Date, username: string, theme = "green") {
   const width = 540;
   const center = width / 2;
   const maxRadius = 200;
@@ -81,32 +90,24 @@ function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, usernam
   const startLabel = formatDate(weekStart);
   const endLabel = formatDate(weekEnd);
 
-  const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
-  commits.forEach(c => {
-    const d = new Date(c.date);
-    const day = d.getUTCDay();
-    const hour = d.getUTCHours();
-    heatmap[day][hour]++;
-  });
+  // Initialize weekly contributions
+  const weeklyContributions = Array(7).fill(0);
+  const currentDate = new Date(weekStart);
+  for (let i = 0; i < 7; i++) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    weeklyContributions[i] = contributions[dateStr] || 0;
+    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+  }
 
   return `
 <svg width="${width}" height="${width + 50}" viewBox="0 0 ${width} ${width + 50}" xmlns="http://www.w3.org/2000/svg" style="background:${background}; font-family:sans-serif;">
-
   <!-- Rings -->
   ${Array.from({ length: 7 }).map((_, i) => {
     const r = radiusStep * (i + 1);
     return `<circle cx="${center}" cy="${center}" r="${r}" stroke="#1e293b" stroke-width="1" fill="none"/>`;
   }).join("")}
 
-  <!-- Hour Labels (Clockwise, top=0) -->
-  ${Array.from({ length: 24 }).map((_, hour) => {
-    const angle = ((hour - 6 + 24) % 24) * (2 * Math.PI / 24);
-    const x = center + Math.cos(angle) * (maxRadius + 14);
-    const y = center + Math.sin(angle) * (maxRadius + 14);
-    return `<text x="${x}" y="${y}" fill="white" font-size="11" text-anchor="middle" dominant-baseline="middle">${hour}</text>`;
-  }).join("")}
-
-  <!-- Slanted Weekday Labels -->
+  <!-- Day Labels -->
   ${dayLabels.map((label, i) => {
     const r = radiusStep * (i + 1);
     const angle = 225 * (Math.PI / 180);
@@ -115,18 +116,21 @@ function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, usernam
     return `<text x="${x}" y="${y}" fill="white" font-size="13" text-anchor="middle" transform="rotate(-25 ${x} ${y})">${label}</text>`;
   }).join("")}
 
-  <!-- Commit Dots -->
-  ${heatmap.flatMap((row, day) =>
-    row.map((count, hour) => {
-      if (count === 0) return "";
-      const angle = ((hour - 6 + 24) % 24) * (2 * Math.PI / 24);
-      const r = radiusStep * (day + 1);
-      const x = center + Math.cos(angle) * r;
-      const y = center + Math.sin(angle) * r;
-      const size = Math.min(7, count * 1.5);
-      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size}" fill="${themeColor}" opacity="${Math.min(1, count / 4)}"/>`;
-    })
-  ).join("")}
+  <!-- Contribution Dots -->
+  ${weeklyContributions.flatMap((count, dayIndex) => {
+    const radius = radiusStep * (dayIndex + 1);
+    const dots = [];
+    const maxDots = 24; // Max dots to display per day
+    const spacing = (2 * Math.PI) / Math.max(count, 1);
+    
+    for (let i = 0; i < Math.min(count, maxDots); i++) {
+      const angle = spacing * i;
+      const x = center + Math.cos(angle) * radius;
+      const y = center + Math.sin(angle) * radius;
+      dots.push(`<circle cx="${x}" cy="${y}" r="3" fill="${themeColor}"/>`);
+    }
+    return dots;
+  }).join("")}
 
   <!-- Caption -->
   <text x="${center}" y="${width + 30}" fill="#94a3b8" font-size="14" text-anchor="middle">
@@ -140,8 +144,8 @@ export async function GET(req: Request) {
   const username = searchParams.get("username") || "octocat";
   const theme = searchParams.get("theme") || "green";
 
-  const { commits, weekStart, weekEnd } = await fetchWeeklyContributions(username);
-  const svg = renderRadialSVG(commits, weekStart, weekEnd, username, theme);
+  const { contributions, weekStart, weekEnd } = await fetchWeeklyContributions(username);
+  const svg = renderRadialSVG(contributions, weekStart, weekEnd, username, theme);
 
   return new NextResponse(svg, {
     headers: {
