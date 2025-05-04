@@ -34,62 +34,69 @@ async function fetchWeeklyCommits(username: string) {
         query {
           user(login: "${username}") {
             contributionsCollection(from: "${weekStart.toISOString()}", to: "${weekEnd.toISOString()}") {
-              contributionCalendar {
-                weeks {
-                  contributionDays {
-                    date
-                    weekday
-                    contributionCount
+              commitContributionsByRepository(maxRepositories: 5) {
+                contributions(first: 100) {
+                  nodes {
+                    occurredAt
                   }
                 }
               }
             }
           }
         }
-      `,
+      `
     }),
   });
 
   if (!res.ok) {
-    console.error("GitHub GraphQL error:", await res.text());
-    return { week: Array(7).fill(0), weekStart, weekEnd };
+    console.error("GitHub API failed:", await res.text());
+    return { commits: [], weekStart, weekEnd };
   }
 
   const json = await res.json();
-  const days =
-    json?.data?.user?.contributionsCollection?.contributionCalendar?.weeks?.flatMap(
-      (w: any) => w.contributionDays
-    ) || [];
+  const contributions = json?.data?.user?.contributionsCollection?.commitContributionsByRepository || [];
 
-  const week = Array(7).fill(0);
-  for (const d of days) {
-    if (d.weekday >= 0 && d.weekday <= 6) {
-      week[d.weekday] = d.contributionCount;
-    }
-  }
+  const commits: { date: string }[] = contributions.flatMap((repo: any) =>
+    repo.contributions.nodes.map((node: any) => ({ date: node.occurredAt }))
+  );
 
-  return { week, weekStart, weekEnd };
+  return { commits, weekStart, weekEnd };
 }
 
-function renderRadialSVG(week: number[], weekStart: Date, weekEnd: Date, username: string, theme = "green") {
-  const width = 600;
-  const height = 600;
+function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, username: string, theme = "green") {
+  const width = 500;
   const center = width / 2;
-  const maxRadius = 200;
+  const maxRadius = 180;
   const radiusStep = maxRadius / 7;
-  const themeColor = "#22c55e";
+  const themeColor = theme === "blue" ? "#3b82f6" : "#22c55e";
   const background = "#0f172a";
 
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const startLabel = formatDate(weekStart);
   const endLabel = formatDate(weekEnd);
 
+  const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
+  commits.forEach(c => {
+    const d = new Date(c.date);
+    const day = d.getUTCDay();
+    const hour = d.getUTCHours();
+    heatmap[day][hour]++;
+  });
+
   return `
-<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" style="background:${background}; font-family:sans-serif;">
+<svg width="${width}" height="${width + 50}" viewBox="0 0 ${width} ${width + 50}" xmlns="http://www.w3.org/2000/svg" style="background:${background}; font-family:sans-serif;">
   <!-- Concentric Rings -->
   ${Array.from({ length: 7 }).map((_, i) => {
     const r = radiusStep * (i + 1);
     return `<circle cx="${center}" cy="${center}" r="${r}" stroke="#1e293b" stroke-width="1" fill="none"/>`;
+  }).join("")}
+
+  <!-- Hour Labels -->
+  ${Array.from({ length: 24 }).map((_, hour) => {
+    const angle = (hour / 24) * 2 * Math.PI;
+    const x = center + Math.cos(angle) * (maxRadius + 14);
+    const y = center + Math.sin(angle) * (maxRadius + 14);
+    return `<text x="${x}" y="${y}" fill="white" font-size="12" text-anchor="middle" dominant-baseline="middle">${hour}</text>`;
   }).join("")}
 
   <!-- Slanted Day Labels -->
@@ -102,18 +109,20 @@ function renderRadialSVG(week: number[], weekStart: Date, weekEnd: Date, usernam
   }).join("")}
 
   <!-- Commit Dots -->
-  ${week.map((count, day) => {
-    if (count === 0) return "";
-    const angle = (12 / 24) * 2 * Math.PI; // Positioning at noon for visibility
-    const r = radiusStep * (day + 1);
-    const x = center + Math.cos(angle) * r;
-    const y = center + Math.sin(angle) * r;
-    const size = Math.min(10, count * 2);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size}" fill="${themeColor}" opacity="${Math.min(1, count / 4)}"/>`;
-  }).join("")}
+  ${heatmap.flatMap((row, day) =>
+    row.map((count, hour) => {
+      if (count === 0) return "";
+      const angle = (hour / 24) * 2 * Math.PI;
+      const r = radiusStep * (day + 1);
+      const x = center + Math.cos(angle) * r;
+      const y = center + Math.sin(angle) * r;
+      const size = Math.min(7, count * 1.5);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size}" fill="${themeColor}" opacity="${Math.min(1, count / 4)}"/>`;
+    })
+  ).join("")}
 
   <!-- Caption -->
-  <text x="${center}" y="${height - 20}" fill="#94a3b8" font-size="14" text-anchor="middle">
+  <text x="${center}" y="${width + 30}" fill="#94a3b8" font-size="14" text-anchor="middle">
     GitHub activity for ${username} from ${startLabel} to ${endLabel} (UTC)
   </text>
 </svg>`;
@@ -124,14 +133,16 @@ export async function GET(req: Request) {
   const username = searchParams.get("username") || "octocat";
   const theme = searchParams.get("theme") || "green";
 
-  const { week, weekStart, weekEnd } = await fetchWeeklyCommits(username);
-  const svg = renderRadialSVG(week, weekStart, weekEnd, username, theme);
+  const { commits, weekStart, weekEnd } = await fetchWeeklyCommits(username);
+  const svg = renderRadialSVG(commits, weekStart, weekEnd, username, theme);
 
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml",
       "Cache-Control": "no-store",
+      "Content-Disposition": 'inline; filename="heatmap.svg"',
     },
   });
 }
+
 
