@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-
 export const dynamic = "force-dynamic";
 
 function formatDate(date: Date) {
@@ -11,7 +10,7 @@ function formatDate(date: Date) {
   });
 }
 
-async function fetchWeeklyCommits(username: string) {
+async function fetchWeeklyContributions(username: string) {
   const today = new Date();
   const dayOfWeek = today.getUTCDay();
 
@@ -34,39 +33,46 @@ async function fetchWeeklyCommits(username: string) {
         query {
           user(login: "${username}") {
             contributionsCollection(from: "${weekStart.toISOString()}", to: "${weekEnd.toISOString()}") {
-              commitContributionsByRepository(maxRepositories: 5) {
-                contributions(first: 100) {
-                  nodes {
-                    occurredAt
+              contributionCalendar {
+                weeks {
+                  contributionDays {
+                    date
+                    weekday
+                    contributionCount
                   }
                 }
               }
             }
           }
         }
-      `
+      `,
     }),
   });
 
   if (!res.ok) {
-    console.error("GitHub API failed:", await res.text());
+    console.error("GitHub API error:", await res.text());
     return { commits: [], weekStart, weekEnd };
   }
 
   const json = await res.json();
-  const contributions = json?.data?.user?.contributionsCollection?.commitContributionsByRepository || [];
+  const days = json?.data?.user?.contributionsCollection?.contributionCalendar?.weeks?.flatMap(
+    (week: any) => week.contributionDays
+  ) || [];
 
-  const commits: { date: string }[] = contributions.flatMap((repo: any) =>
-    repo.contributions.nodes.map((node: any) => ({ date: node.occurredAt }))
-  );
+  const commits = days.flatMap((d: any) => {
+    const date = new Date(d.date);
+    return Array(d.contributionCount).fill(null).map(() => ({
+      date: date.toISOString(),
+    }));
+  });
 
   return { commits, weekStart, weekEnd };
 }
 
 function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, username: string, theme = "green") {
-  const width = 500;
+  const width = 540;
   const center = width / 2;
-  const maxRadius = 180;
+  const maxRadius = 200;
   const radiusStep = maxRadius / 7;
   const themeColor = theme === "blue" ? "#3b82f6" : "#22c55e";
   const background = "#0f172a";
@@ -85,21 +91,22 @@ function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, usernam
 
   return `
 <svg width="${width}" height="${width + 50}" viewBox="0 0 ${width} ${width + 50}" xmlns="http://www.w3.org/2000/svg" style="background:${background}; font-family:sans-serif;">
-  <!-- Concentric Rings -->
+
+  <!-- Rings -->
   ${Array.from({ length: 7 }).map((_, i) => {
     const r = radiusStep * (i + 1);
     return `<circle cx="${center}" cy="${center}" r="${r}" stroke="#1e293b" stroke-width="1" fill="none"/>`;
   }).join("")}
 
-  <!-- Hour Labels -->
+  <!-- Hour Labels (Clockwise, top=0) -->
   ${Array.from({ length: 24 }).map((_, hour) => {
-    const angle = (hour / 24) * 2 * Math.PI;
+    const angle = ((hour - 6 + 24) % 24) * (2 * Math.PI / 24);
     const x = center + Math.cos(angle) * (maxRadius + 14);
     const y = center + Math.sin(angle) * (maxRadius + 14);
-    return `<text x="${x}" y="${y}" fill="white" font-size="12" text-anchor="middle" dominant-baseline="middle">${hour}</text>`;
+    return `<text x="${x}" y="${y}" fill="white" font-size="11" text-anchor="middle" dominant-baseline="middle">${hour}</text>`;
   }).join("")}
 
-  <!-- Slanted Day Labels -->
+  <!-- Slanted Weekday Labels -->
   ${dayLabels.map((label, i) => {
     const r = radiusStep * (i + 1);
     const angle = 225 * (Math.PI / 180);
@@ -112,7 +119,7 @@ function renderRadialSVG(commits: any[], weekStart: Date, weekEnd: Date, usernam
   ${heatmap.flatMap((row, day) =>
     row.map((count, hour) => {
       if (count === 0) return "";
-      const angle = (hour / 24) * 2 * Math.PI;
+      const angle = ((hour - 6 + 24) % 24) * (2 * Math.PI / 24);
       const r = radiusStep * (day + 1);
       const x = center + Math.cos(angle) * r;
       const y = center + Math.sin(angle) * r;
@@ -133,16 +140,13 @@ export async function GET(req: Request) {
   const username = searchParams.get("username") || "octocat";
   const theme = searchParams.get("theme") || "green";
 
-  const { commits, weekStart, weekEnd } = await fetchWeeklyCommits(username);
+  const { commits, weekStart, weekEnd } = await fetchWeeklyContributions(username);
   const svg = renderRadialSVG(commits, weekStart, weekEnd, username, theme);
 
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml",
       "Cache-Control": "no-store",
-      "Content-Disposition": 'inline; filename="heatmap.svg"',
     },
   });
 }
-
-
