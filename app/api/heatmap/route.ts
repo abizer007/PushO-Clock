@@ -1,102 +1,168 @@
 import { NextResponse } from "next/server";
 
-async function fetchCommits(username: string) {
-  const res = await fetch(`https://api.github.com/users/${username}/events/public`, {
-    headers: {
-     // Remove Authorization for GitHub Camo compatibility
-    // Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+// SVG layout constants
+const center = 150;
+const radius = 90;
 
-      "User-Agent": "PushO-Clock",
+// ----------------------
+// 1. Fetch GitHub contributions via GraphQL
+// ----------------------
+async function fetchCommitsGraphQL(username: string) {
+  const res = await fetch("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({
+      query: `
+        query {
+          user(login: "${username}") {
+            contributionsCollection {
+              contributionCalendar {
+                weeks {
+                  contributionDays {
+                    date
+                    weekday
+                    contributionCount
+                  }
+                }
+              }
+            }
+          }
+        }
+      `,
+    }),
   });
 
-  if (!res.ok) return [];
+  if (!res.ok) {
+    console.error("GitHub GraphQL error:", await res.text());
+    return [];
+  }
 
-  const data = await res.json();
-  return data
-    .filter((event: any) => event.type === "PushEvent")
-    .flatMap((event: any) =>
-      event.payload.commits.map(() => ({
-        date: event.created_at,
-      }))
-    );
+  const json = await res.json();
+  const days = json.data.user.contributionsCollection.contributionCalendar.weeks
+    .flatMap((week: any) => week.contributionDays)
+    .filter((d: any) => d.contributionCount > 0)
+    .map((d: any) => ({
+      date: d.date,
+      count: d.contributionCount,
+    }));
+
+  return days;
 }
 
-function renderExactRadial(commits: any[]) {
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// ----------------------
+// 2. Convert date data to 7x24 heatmap matrix
+// ----------------------
+function buildHeatmap(commits: { date: string; count: number }[]) {
   const heatmap = Array.from({ length: 7 }, () => Array(24).fill(0));
-
-  commits.forEach((c: any) => {
-    const d = new Date(c.date);
-    heatmap[d.getUTCDay()][d.getUTCHours()]++;
+  commits.forEach(({ date, count }) => {
+    const dt = new Date(date);
+    const day = dt.getUTCDay();     // Sunday = 0
+    const hour = dt.getUTCHours();  // UTC Hour
+    heatmap[day][hour] += count;
   });
+  return heatmap;
+}
 
-  const svg = [];
-  const center = 200;
-  const radiusStep = 25;
+// ----------------------
+// 3. Render radial SVG
+// ----------------------
+function renderRadialSVG(heatmap: number[][], theme = "green") {
+  const center = 150;
+  const svgRings = 7;
+  const outerRadius = 120;
 
-  // Base: background + glow
-  svg.push(`<rect width="100%" height="100%" fill="#0f172a"/>`);
-  svg.push(`<circle cx="${center}" cy="${center}" r="5" fill="#22c55e" opacity="0.3"/>`);
-
-  // Gridlines
-  for (let r = radiusStep; r <= radiusStep * 7; r += radiusStep) {
-    svg.push(`<circle cx="${center}" cy="${center}" r="${r}" stroke="#1e293b" stroke-width="1" fill="none"/>`);
-  }
-
-  // Hour labels
-  for (let h = 0; h < 24; h++) {
-    const angle = (h / 24) * 2 * Math.PI;
-    const r = radiusStep * 7 + 15;
-    const x = center + r * Math.sin(angle);
-    const y = center - r * Math.cos(angle);
-    svg.push(`<text x="${x}" y="${y}" font-size="10" fill="#fff" text-anchor="middle" dominant-baseline="middle">${h}</text>`);
-  }
-
-  // Day labels
-  for (let d = 0; d < 7; d++) {
-    const r = radiusStep * (d + 1);
-    svg.push(`<text x="${center - 110}" y="${center + r - 3}" font-size="10" fill="#fff">${days[d]}</text>`);
-  }
-
-  // Dots (commits)
-  heatmap.forEach((row, day) => {
-    row.forEach((count, hour) => {
-      if (count === 0) return;
-      const angle = (hour / 24) * 2 * Math.PI;
-      const r = radiusStep * (day + 1);
-      const x = center + r * Math.sin(angle);
-      const y = center - r * Math.cos(angle);
-      const radius = Math.min(6, count * 1.5);
-      svg.push(`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${radius}" fill="#22c55e" opacity="${Math.min(1, count / 4)}"/>`);
-    });
-  });
+  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const hourLabels = Array.from({ length: 24 }, (_, i) => i);
 
   return `
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-  <style>
-    text { font-family: sans-serif; }
-  </style>
-  ${svg.join("\n")}
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" style="background:#0f172a;font-family:Arial,sans-serif">
+  <g text-anchor="middle" font-size="10" fill="#fff">
+    ${hourLabels.map(h => {
+      const angle = (h / 24) * 2 * Math.PI - Math.PI / 2;
+      const x = center + Math.cos(angle) * (outerRadius + 10);
+      const y = center + Math.sin(angle) * (outerRadius + 10) + 3;
+      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${h}</text>`;
+    }).join("")}
+
+    ${dayLabels.map((day, i) => {
+      const y = center + 5 + i * -15;
+      return `<text x="${center - 135}" y="${y}">${day}</text>`;
+    }).join("")}
+  </g>
+
+  ${Array.from({ length: svgRings }).map((_, i) => {
+    return `<circle cx="${center}" cy="${center}" r="${(i + 1) * 15}" stroke="#334155" stroke-width="1" fill="none"/>`;
+  }).join("")}
+
+  ${heatmap.flatMap((row, day) =>
+    row.map((count, hour) => {
+      if (count === 0) return "";
+      const angle = (hour / 24) * 2 * Math.PI - Math.PI / 2;
+      const r = (7 - day) * 15;
+      const x = center + Math.cos(angle) * r;
+      const y = center + Math.sin(angle) * r;
+      const size = Math.min(6, count * 1.2);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size}" fill="#22c55e" opacity="${Math.min(1, count / 4)}"/>`;
+    })
+  ).join("")}
 </svg>`;
 }
 
+
+// ----------------------
+// 4. Render grid SVG (24x7)
+// ----------------------
+function renderGridSVG(heatmap: number[][], theme = "green") {
+  const cellSize = 12;
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" width="${24 * cellSize}" height="${7 * cellSize}" style="background:#111;">
+    ${heatmap.map((row, y) =>
+      row.map((count, x) => {
+        const opacity = Math.min(1, count / 4);
+        return `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize - 2}" height="${cellSize - 2}" fill="#22c55e" opacity="${opacity}"/>`;
+      }).join("")
+    ).join("")}
+  </svg>`;
+}
+
+// ----------------------
+// 5. Final API Handler
+// ----------------------
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const username = searchParams.get("username") || "octocat";
+  const username = searchParams.get("username");
+  const type = searchParams.get("type") || "radial";
+  const theme = searchParams.get("theme") || "green";
 
-  try {
-    const commits = await fetchCommits(username);
-    const svg = renderExactRadial(commits);
-
-    return new NextResponse(svg, {
-      status: 200,
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "Cache-Control": "public, max-age=1800",
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "Could not generate heatmap" }, { status: 500 });
+  if (!username) {
+    return NextResponse.json({ error: "Missing username" }, { status: 400 });
   }
+
+  // Get dynamic commit data
+  const commits = await fetchCommitsGraphQL(username);
+  const heatmap = buildHeatmap(commits);
+
+  // Generate the correct SVG format
+  const svg = type === "grid"
+    ? renderGridSVG(heatmap, theme)
+    : renderRadialSVG(heatmap, theme);
+
+  // Compute current ISO week for weekly cache key
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const jan1 = new Date(Date.UTC(year, 0, 1));
+  const week = Math.ceil((((now.getTime() - jan1.getTime()) / 86400000) + jan1.getUTCDay() + 1) / 7);
+  const cacheKey = `week-${year}-W${week}`;
+
+  console.log("Serving cache for:", cacheKey);
+
+  return new NextResponse(svg, {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "public, max-age=604800, stale-while-revalidate",
+    },
+  });
 }
