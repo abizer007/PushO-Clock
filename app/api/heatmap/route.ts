@@ -11,11 +11,10 @@ function getMonthRange(date: Date) {
 }
 
 async function fetch30DayContributions(username: string) {
-  const today = new Date();
-  const endDate = new Date(today);
+  const endDate = new Date(); // TODAY
   endDate.setUTCHours(23, 59, 59, 999);
   const startDate = new Date(endDate);
-  startDate.setUTCDate(endDate.getUTCDate() - 29);
+  startDate.setUTCDate(startDate.getUTCDate() - 29);
   startDate.setUTCHours(0, 0, 0, 0);
 
   const query = `
@@ -69,7 +68,7 @@ async function fetch30DayContributions(username: string) {
       month: getMonthRange(endDate),
     };
   } catch (error) {
-    console.error("Fetch error:", error);
+    console.error("GitHub API Error:", error);
     return {
       contributions: {},
       startDate,
@@ -94,7 +93,7 @@ function renderSVG(contributions: Record<string, number>, month: string, endDate
   const dates = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(endDate);
     d.setUTCDate(endDate.getUTCDate() - 29 + i);
-    return d;
+    return new Date(d); // ensure new instance
   });
 
   const values = dates.map((d) => {
@@ -118,14 +117,15 @@ function renderSVG(contributions: Record<string, number>, month: string, endDate
   <text x="${center}" y="40" text-anchor="middle" class="title">GitHub Contributions</text>
   <text x="${center}" y="60" text-anchor="middle" class="subtitle">Last 30 Days • ${month}</text>
 
-  <!-- Radial grid -->
+  <!-- Grid Circles -->
   ${[25, 50, 75].map(r => `
-    <circle cx="${center}" cy="${center}" r="${r}" fill="none" stroke="${gridColor}" stroke-width="1" />`).join('')}
+    <circle cx="${center}" cy="${center}" r="${r}" fill="none" stroke="${gridColor}" stroke-width="1" />
+  `).join('')}
 
   <!-- Bars -->
   ${values.map((value, i) => {
     const angle = angleStep * i - 90;
-    const rad = (angle * Math.PI) / 180;
+    const rad = angle * Math.PI / 180;
     const barLength = (value / maxVal) * maxBarLength;
 
     const x1 = center + Math.cos(rad) * baseRadius;
@@ -133,17 +133,17 @@ function renderSVG(contributions: Record<string, number>, month: string, endDate
     const x2 = center + Math.cos(rad) * (baseRadius + barLength);
     const y2 = center + Math.sin(rad) * (baseRadius + barLength);
 
-    const dayLabelX = center + Math.cos(rad) * (baseRadius - 20);
-    const dayLabelY = center + Math.sin(rad) * (baseRadius - 20);
+    const labelX = center + Math.cos(rad) * (baseRadius - 20);
+    const labelY = center + Math.sin(rad) * (baseRadius - 20);
 
     return `
       <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
             stroke="${barColor}" stroke-width="5" stroke-linecap="round"
             opacity="${0.4 + (value / maxVal) * 0.6}" />
-      <text x="${dayLabelX}" y="${dayLabelY}" text-anchor="middle" alignment-baseline="middle" class="label">
+      <text x="${labelX}" y="${labelY}" text-anchor="middle" alignment-baseline="middle" class="label">
         ${dates[i].getUTCDate()}
       </text>`;
-  }).join("")}
+  }).join('')}
 
   <!-- Footer -->
   <text x="${center}" y="${height - 20}" text-anchor="middle" class="label">
