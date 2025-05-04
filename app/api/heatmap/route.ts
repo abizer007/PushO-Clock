@@ -1,28 +1,16 @@
 import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
-const CHART_CONFIG = {
-  width: 800,
-  height: 900,
-  center: 400,
-  innerRadius: 250,
-  maxBarHeight: 120,
-  days: 30,
-  colors: {
-    background: "#0C081F",
-    bar: "#22c55e",
-    text: "#FFFFFF",
-    grid: "#2D3751",
-    accent: "#DC2626",
-    today: "#F4E55E"
-  }
+const CHART_COLORS = {
+  bg: "#0C081F",
+  bar: "#22c55e",
+  text: "#FFFFFF",
+  grid: "#2D3751",
+  accent: "#DC2626"
 };
 
-async function fetchGitHubContributions(username: string) {
-  const today = new Date();
-  const endDate = new Date(today);
-  endDate.setUTCHours(23, 59, 59, 999);
-  
+async function fetchCommitData(username: string) {
+  const endDate = new Date();
   const startDate = new Date(endDate);
   startDate.setUTCDate(endDate.getUTCDate() - 29);
   startDate.setUTCHours(0, 0, 0, 0);
@@ -36,7 +24,6 @@ async function fetchGitHubContributions(username: string) {
               contributionDays {
                 date
                 contributionCount
-                weekday
               }
             }
           }
@@ -45,6 +32,12 @@ async function fetchGitHubContributions(username: string) {
     }
   `;
 
+  const variables = {
+    userLogin: username,
+    from: startDate.toISOString(),
+    to: endDate.toISOString()
+  };
+
   try {
     const res = await fetch("https://api.github.com/graphql", {
       method: "POST",
@@ -52,14 +45,7 @@ async function fetchGitHubContributions(username: string) {
         Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        query,
-        variables: {
-          userLogin: username,
-          from: startDate.toISOString(),
-          to: endDate.toISOString()
-        }
-      }),
+      body: JSON.stringify({ query, variables }),
     });
 
     if (!res.ok) throw new Error(`API Error: ${res.status}`);
@@ -72,130 +58,107 @@ async function fetchGitHubContributions(username: string) {
         return acc;
       }, {}) || {};
 
-    return {
+    return { 
       contributions,
       startDate,
       endDate,
-      month: endDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })
+      month: getMonthRange(endDate)
     };
   } catch (error) {
     console.error("Fetch error:", error);
-    return {
+    return { 
       contributions: {},
       startDate,
       endDate,
-      month: endDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })
+      month: getMonthRange(endDate)
     };
   }
 }
 
-function calculateBarProperties(index: number, commitCount: number, maxCommits: number) {
-  const angle = (index * 12) - 90;
-  const radians = angle * Math.PI / 180;
-  const barHeight = (commitCount / maxCommits) * CHART_CONFIG.maxBarHeight;
-  const opacity = 0.3 + (commitCount / maxCommits) * 0.7;
-  const barWidth = 4 + (commitCount / maxCommits) * 8;
-  
-  return {
-    angle,
-    radians,
-    barHeight,
-    opacity,
-    barWidth,
-    x: CHART_CONFIG.center + Math.cos(radians) * CHART_CONFIG.innerRadius,
-    y: CHART_CONFIG.center + Math.sin(radians) * CHART_CONFIG.innerRadius
-  };
+  // GitHub API call remains similar to previous implementation
+  // ... (use the fetch30DayContributions logic from earlier)
 }
 
-function renderCommitChart(contributions: Record<string, number>, month: string) {
-  const dates = Array.from({ length: CHART_CONFIG.days }, (_, i) => {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() - 29 + i);
-    return d;
+function renderCircularCommitChart(contributions: Record<string, number>, month: string) {
+  const width = 800;
+  const center = width / 2;
+  const innerRadius = 180;
+  const maxBarLength = 120;
+  const days = 30;
+  
+  const values = Array.from({ length: days }, (_, i) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - 29 + i);
+    return contributions[date.toISOString().split('T')[0]] || 0;
   });
-
-  const values = dates.map(d => {
-    const dateStr = d.toISOString().split('T')[0];
-    return contributions[dateStr] || 0;
-  });
-
+  
   const maxCommits = Math.max(...values, 1);
-  const todayIndex = dates.findIndex(d => d.toDateString() === new Date().toDateString());
+  const barAngles = Array.from({ length: days }, (_, i) => (i * 12) - 90);
 
   return `
-<svg width="${CHART_CONFIG.width}" height="${CHART_CONFIG.height}" 
-     viewBox="0 0 ${CHART_CONFIG.width} ${CHART_CONFIG.height}" 
-     xmlns="http://www.w3.org/2000/svg" 
-     style="background:${CHART_CONFIG.colors.background}; font-family: 'Ubuntu', sans-serif;">
-
+<svg width="${width}" height="${width + 100}" viewBox="0 0 ${width} ${width + 100}" 
+     xmlns="http://www.w3.org/2000/svg" style="background:${CHART_COLORS.bg};">
+  
   <!-- Grid Circles -->
-  ${[150, 200, 250, 300].map((r, i) => `
-    <circle cx="${CHART_CONFIG.center}" cy="${CHART_CONFIG.center}" r="${r}" 
-            fill="none" stroke="${CHART_CONFIG.colors.grid}" 
-            stroke-opacity="0.${3 - i}" stroke-width="1"/>`).join('')}
+  ${[40, 80, 120, 160].map(r => 
+    `<circle cx="${center}" cy="${center}" r="${r}" fill="none" stroke="${CHART_COLORS.grid}" stroke-opacity="0.2"/>`
+  ).join('')}
 
   <!-- Commit Bars -->
-  ${dates.map((date, index) => {
-    const commitCount = values[index];
-    const { angle, radians, barHeight, opacity, barWidth, x, y } = 
-      calculateBarProperties(index, commitCount, maxCommits);
-    const isToday = index === todayIndex;
-
+  ${barAngles.map((angle, i) => {
+    const radians = angle * Math.PI / 180;
+    const barHeight = (values[i] / maxCommits) * maxBarLength;
+    const intensity = values[i] / maxCommits;
+    
     return `
-    <g transform="rotate(${angle} ${CHART_CONFIG.center} ${CHART_CONFIG.center})">
-      <rect x="${CHART_CONFIG.center}" 
-            y="${CHART_CONFIG.center - CHART_CONFIG.innerRadius}" 
-            width="${barWidth}" 
+    <g transform="rotate(${angle} ${center} ${center})">
+      <rect x="${center}" y="${center - innerRadius}" 
+            width="${4 + intensity * 8}" 
             height="${barHeight}" 
-            fill="${isToday ? CHART_CONFIG.colors.today : CHART_CONFIG.colors.bar}" 
-            opacity="${isToday ? 1 : opacity}"
-            rx="2" 
-            ry="2"/>
-    </g>
-    <text x="${x + Math.cos(radians) * 30}" 
-          y="${y + Math.sin(radians) * 30}" 
-          fill="${CHART_CONFIG.colors.text}" 
+            fill="${CHART_COLORS.bar}" 
+            opacity="${0.3 + intensity * 0.7}"
+            rx="2"/>
+    </g>`;
+  }).join('')}
+
+  <!-- Day Labels -->
+  ${barAngles.map((angle, i) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - 29 + i);
+    return `
+    <text x="${center + Math.cos(angle * Math.PI / 180) * (innerRadius - 30)}" 
+          y="${center + Math.sin(angle * Math.PI / 180) * (innerRadius - 30)}" 
+          fill="${CHART_COLORS.text}" 
           font-size="12" 
           text-anchor="middle" 
-          transform="rotate(${angle + 90} ${x} ${y})"
-          opacity="0.8">
+          opacity="0.6"
+          transform="rotate(${angle + 90} ${center + Math.cos(angle * Math.PI / 180) * (innerRadius - 30)} ${center + Math.sin(angle * Math.PI / 180) * (innerRadius - 30)})">
       ${date.getUTCDate()}
     </text>`;
   }).join('')}
 
-  <!-- Center Content -->
-  <text x="${CHART_CONFIG.center}" y="${CHART_CONFIG.center - 20}" 
-        font-size="32" fill="${CHART_CONFIG.colors.text}" 
-        text-anchor="middle" font-weight="500">
+  <!-- Center Info -->
+  <text x="${center}" y="${center - 20}" font-size="32" fill="${CHART_COLORS.text}" 
+        text-anchor="middle" font-family="Ubuntu, sans-serif">
     ${month}
   </text>
-  <text x="${CHART_CONFIG.center}" y="${CHART_CONFIG.center + 30}" 
-        font-size="18" fill="${CHART_CONFIG.colors.accent}" 
-        text-anchor="middle">
+  <text x="${center}" y="${center + 30}" font-size="18" fill="${CHART_COLORS.accent}" 
+        text-anchor="middle" font-family="Ubuntu, sans-serif">
     Daily Commits
   </text>
 
   <!-- Legend -->
-  <g transform="translate(${CHART_CONFIG.center + 200} ${CHART_CONFIG.center - 100})">
-    <rect x="0" y="0" width="20" height="20" 
-          fill="${CHART_CONFIG.colors.bar}" opacity="0.5" rx="2"/>
-    <text x="30" y="15" fill="${CHART_CONFIG.colors.text}" font-size="14">1 Commit</text>
-    
-    <rect x="0" y="30" width="20" height="20" 
-          fill="${CHART_CONFIG.colors.bar}" opacity="1" rx="2"/>
-    <text x="30" y="45" fill="${CHART_CONFIG.colors.text}" font-size="14">
-      ${maxCommits}+ Commits
-    </text>
-    
-    <circle cx="10" cy="75" r="6" fill="${CHART_CONFIG.colors.today}"/>
-    <text x="30" y="80" fill="${CHART_CONFIG.colors.text}" font-size="14">Today</text>
+  <g transform="translate(${center + 200} ${center - 100})">
+    <rect x="0" y="0" width="20" height="20" fill="${CHART_COLORS.bar}" opacity="0.5"/>
+    <text x="30" y="15" fill="${CHART_COLORS.text}" font-size="14">1 Commit</text>
+    <rect x="0" y="30" width="20" height="20" fill="${CHART_COLORS.bar}" opacity="1"/>
+    <text x="30" y="45" fill="${CHART_COLORS.text}" font-size="14">${maxCommits}+ Commits</text>
   </g>
 
   <!-- Caption -->
-  <text x="${CHART_CONFIG.center}" y="${CHART_CONFIG.height - 30}" 
-        fill="${CHART_CONFIG.colors.text}" font-size="14" 
-        text-anchor="middle" opacity="0.8">
-    GitHub Activity for ${month} • Updated ${new Date().toLocaleDateString()}
+  <text x="${center}" y="${width + 80}" fill="${CHART_COLORS.text}" 
+        font-size="16" text-anchor="middle" opacity="0.8">
+    GitHub Activity • Updated ${new Date().toLocaleDateString()}
   </text>
 </svg>`;
 }
@@ -203,19 +166,12 @@ function renderCommitChart(contributions: Record<string, number>, month: string)
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const username = searchParams.get("username") || "octocat";
-
-  try {
-    const { contributions, month } = await fetchGitHubContributions(username);
-    return new NextResponse(renderCommitChart(contributions, month), {
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "Cache-Control": "no-store, max-age=0"
-      }
-    });
-  } catch (error) {
-    return new NextResponse(renderCommitChart({}, "Error"), {
-      status: 500,
-      headers: { "Content-Type": "image/svg+xml" }
-    });
-  }
+  
+  const { contributions, month } = await fetchCommitData(username);
+  return new NextResponse(renderCircularCommitChart(contributions, month), {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "no-store, max-age=0"
+    }
+  });
 }
