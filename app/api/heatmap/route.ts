@@ -8,6 +8,10 @@ const radius = 90;
 // 1. Fetch GitHub contributions via GraphQL
 // ----------------------
 async function fetchCommitsGraphQL(username: string) {
+  const today = new Date();
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(today.getFullYear() - 1);
+
   const res = await fetch("https://api.github.com/graphql", {
     method: "POST",
     headers: {
@@ -18,7 +22,7 @@ async function fetchCommitsGraphQL(username: string) {
       query: `
         query {
           user(login: "${username}") {
-            contributionsCollection {
+            contributionsCollection(from: "${oneYearAgo.toISOString()}", to: "${today.toISOString()}") {
               contributionCalendar {
                 weeks {
                   contributionDays {
@@ -31,8 +35,8 @@ async function fetchCommitsGraphQL(username: string) {
             }
           }
         }
-      `,
-    }),
+      `
+    })
   });
 
   if (!res.ok) {
@@ -71,61 +75,47 @@ function buildHeatmap(commits: { date: string; count: number }[]) {
 // ----------------------
 function renderRadialSVG(heatmap: number[][], theme = "green") {
   const center = 150;
-  const svgRings = 7;
-  const outerRadius = 120;
+  const ringGap = 15;
+  const labelOffset = 10;
+  const radiusMax = ringGap * 7;
 
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const hourLabels = Array.from({ length: 24 }, (_, i) => i);
 
   return `
-<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" style="background:#0f172a;font-family:Arial,sans-serif">
-  <g text-anchor="middle" font-size="10" fill="#fff">
-    ${hourLabels.map(h => {
-      const angle = (h / 24) * 2 * Math.PI - Math.PI / 2;
-      const x = center + Math.cos(angle) * (outerRadius + 10);
-      const y = center + Math.sin(angle) * (outerRadius + 10) + 3;
-      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}">${h}</text>`;
-    }).join("")}
-
-    ${dayLabels.map((day, i) => {
-      const y = center + 5 + i * -15;
-      return `<text x="${center - 135}" y="${y}">${day}</text>`;
-    }).join("")}
-  </g>
-
-  ${Array.from({ length: svgRings }).map((_, i) => {
-    return `<circle cx="${center}" cy="${center}" r="${(i + 1) * 15}" stroke="#334155" stroke-width="1" fill="none"/>`;
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" style="background:#0f172a;font-family:Arial,sans-serif;">
+  <!-- Concentric rings -->
+  ${Array.from({ length: 7 }).map((_, i) => {
+    const r = ringGap * (i + 1);
+    return `<circle cx="${center}" cy="${center}" r="${r}" stroke="#334155" fill="none" stroke-width="1"/>`;
   }).join("")}
 
+  <!-- Hour labels around -->
+  ${Array.from({ length: 24 }).map((_, h) => {
+    const angle = (h / 24) * 2 * Math.PI - Math.PI / 2;
+    const x = center + Math.cos(angle) * (radiusMax + labelOffset);
+    const y = center + Math.sin(angle) * (radiusMax + labelOffset) + 3;
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" fill="#fff" font-size="10" text-anchor="middle">${h}</text>`;
+  }).join("")}
+
+  <!-- Day labels (Sun to Sat) -->
+  ${dayLabels.map((label, i) => {
+    const y = center - (i - 3) * ringGap;
+    return `<text x="${center - radiusMax - 30}" y="${y}" fill="#fff" font-size="10">${label}</text>`;
+  }).join("")}
+
+  <!-- Data points -->
   ${heatmap.flatMap((row, day) =>
     row.map((count, hour) => {
       if (count === 0) return "";
       const angle = (hour / 24) * 2 * Math.PI - Math.PI / 2;
-      const r = (7 - day) * 15;
+      const r = ringGap * (day + 1);
       const x = center + Math.cos(angle) * r;
       const y = center + Math.sin(angle) * r;
-      const size = Math.min(6, count * 1.2);
+      const size = Math.min(6, count * 1.5);
       return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size}" fill="#22c55e" opacity="${Math.min(1, count / 4)}"/>`;
     })
   ).join("")}
 </svg>`;
-}
-
-
-// ----------------------
-// 4. Render grid SVG (24x7)
-// ----------------------
-function renderGridSVG(heatmap: number[][], theme = "green") {
-  const cellSize = 12;
-  return `
-  <svg xmlns="http://www.w3.org/2000/svg" width="${24 * cellSize}" height="${7 * cellSize}" style="background:#111;">
-    ${heatmap.map((row, y) =>
-      row.map((count, x) => {
-        const opacity = Math.min(1, count / 4);
-        return `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize - 2}" height="${cellSize - 2}" fill="#22c55e" opacity="${opacity}"/>`;
-      }).join("")
-    ).join("")}
-  </svg>`;
 }
 
 // ----------------------
