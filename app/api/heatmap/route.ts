@@ -11,15 +11,17 @@ function getMonthRange(date: Date) {
 }
 
 async function fetch30DayContributions(username: string) {
+  // Get current UTC date
   const now = new Date();
-  // Get current UTC date components
-  const utcYear = now.getUTCFullYear();
-  const utcMonth = now.getUTCMonth();
-  const utcDate = now.getUTCDate();
+  const utcNow = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate()
+  );
   
-  // Set endDate to end of current UTC day
-  const endDate = new Date(Date.UTC(utcYear, utcMonth, utcDate, 23, 59, 59, 999));
-  // Calculate startDate as 29 days before endDate at midnight UTC
+  const endDate = new Date(utcNow);
+  endDate.setUTCHours(23, 59, 59, 999);
+  
   const startDate = new Date(endDate);
   startDate.setUTCDate(startDate.getUTCDate() - 29);
   startDate.setUTCHours(0, 0, 0, 0);
@@ -85,13 +87,7 @@ async function fetch30DayContributions(username: string) {
   }
 }
 
-function renderSVG(
-  contributions: Record<string, number>,
-  month: string,
-  startDate: Date,
-  endDate: Date,
-  username: string
-) {
+function renderSVG(contributions: Record<string, number>, month: string, endDate: Date, username: string) {
   const width = 600;
   const height = 600;
   const center = width / 2;
@@ -103,14 +99,14 @@ function renderSVG(
   const gridColor = "#ffffff22";
   const textColor = "#E2E8F0";
 
-  // Generate dates starting from startDate
+  // Generate dates relative to UTC
   const dates = Array.from({ length: 30 }, (_, i) => {
-    const d = new Date(startDate);
-    d.setUTCDate(d.getUTCDate() + i);
+    const d = new Date(endDate);
+    d.setUTCDate(d.getUTCDate() - 29 + i);
     return d;
   });
 
-  const values = dates.map((d) => {
+  const values = dates.map(d => {
     const key = d.toISOString().split("T")[0];
     return contributions[key] || 0;
   });
@@ -139,7 +135,7 @@ function renderSVG(
   <!-- Bars -->
   ${values.map((value, i) => {
     const angle = angleStep * i - 90;
-    const rad = (angle * Math.PI) / 180;
+    const rad = angle * Math.PI / 180;
     const barLength = (value / maxVal) * maxBarLength;
 
     const x1 = center + Math.cos(rad) * baseRadius;
@@ -175,8 +171,8 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const username = searchParams.get("username") || "octocat";
 
-  const { contributions, month, startDate, endDate } = await fetch30DayContributions(username);
-  const svg = renderSVG(contributions, month, startDate, endDate, username);
+  const { contributions, month, endDate } = await fetch30DayContributions(username);
+  const svg = renderSVG(contributions, month, endDate, username);
 
   return new NextResponse(svg, {
     headers: {
