@@ -131,7 +131,7 @@ npm run dev
 
 ## 📄 License
 
-Apache License © 2025 Abizer Masavi
+Apache-2.0 License © 2025 Abizer Masavi
 
 ---
 
