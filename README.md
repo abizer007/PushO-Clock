@@ -81,9 +81,9 @@ It’s more than a bookmarking tool — it’s a showcase of your journey.
 
 ## 🖼️ Screenshots
 
-<p align="center">
-![image](https://github.com/user-attachments/assets/d352b3d2-eaf0-438f-9c5c-2d0edc253ad1)
-<p/>
+
+![image](https://github.com/user-attachments/assets/da117ed0-53df-4c88-8247-65f9d49792a4)
+
 
 ---
 
@@ -123,7 +123,7 @@ npm run dev
 
 ## 📄 License
 
-MIT License © 2025 Abizer Masavi
+Apache License © 2025 Abizer Masavi
 
 ---
 
