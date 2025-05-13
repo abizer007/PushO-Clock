@@ -90,6 +90,8 @@ It’s more than a bookmarking tool — it’s a showcase of your journey.
 
 ![image](https://github.com/user-attachments/assets/da117ed0-53df-4c88-8247-65f9d49792a4)
 
+![image](https://github.com/user-attachments/assets/f0e5b0e6-1491-43e4-acb5-e6ed8b87a508)
+
 
 ---
 
