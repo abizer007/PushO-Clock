@@ -1,8 +1,9 @@
 
 <h1 align="center">🎮 RetroRepo</h1>
 <p align="center">
-  <img src="https://retrorepo.vercel.app/logo.svg" alt="RetroRepo Logo" width="150"/>
+  <img src="https://github.com/user-attachments/assets/2942fd74-6164-4c43-95f0-be67dc76d107" alt="RetroRepo Preview" />
 </p>
+
 
 <p align="center">
   <b>✨ Curate and collect your favorite retro games, aesthetics, and repositories in one stunning platform.</b>
@@ -26,6 +27,11 @@
 - 🧠 Keep your dev journey organized in style
 
 It’s like your own personal GitHub mixtape from the 80s 🚀
+br
+<p align="center">
+  <img src="https://retrorepo.vercel.app/api/svg/abizer007" alt="abizer007's GitHub Timeline" width="900" />
+</p>
+
 
 ---
 
