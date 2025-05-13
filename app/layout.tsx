@@ -1,24 +1,32 @@
-import "@/app/globals.css"
+import type React from "react"
+import type { Metadata } from "next"
 import { Inter } from "next/font/google"
-
+import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ["latin"] })
 
-export const metadata = {
-  title: "PushO-Clock - Visualize Your GitHub Commit Activity",
-  description:
-    "Transform your GitHub contributions into dynamic, insightful heatmaps that tell the story of your coding journey.",
+export const metadata: Metadata = {
+  title: "RetroRepo - GitHub Timeline Generator",
+  description: "Generate a timeline of your GitHub repositories to embed in your README",
+  icons: {
+    icon: "/favicon.ico",
+  },
     generator: 'v0.dev'
 }
 
-export default function RootLayout({ children }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode
+}>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head />
       <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           {children}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>
